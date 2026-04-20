@@ -3690,12 +3690,20 @@ fn iso_utc_to_unix_secs(iso: &str) -> Option<i64> {
     Some((this_days - epoch_days) * 86400 + h * 3600 + min * 60 + s)
 }
 
-/// Convert Unix seconds to local calendar day count using libc::localtime_r.
-#[cfg(unix)]
-fn unix_to_local_days(unix_secs: i64) -> i64 {
+/// Convert Unix seconds to a libc::tm struct in local time (cross-platform).
+fn unix_secs_to_local_tm(unix_secs: i64) -> libc::tm {
     let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
     let time_t = unix_secs as libc::time_t;
+    #[cfg(unix)]
     unsafe { libc::localtime_r(&time_t, &mut tm) };
+    #[cfg(windows)]
+    unsafe { libc::localtime_s(&mut tm, &time_t) };
+    tm
+}
+
+/// Convert Unix seconds to local calendar day count.
+fn unix_to_local_days(unix_secs: i64) -> i64 {
+    let tm = unix_secs_to_local_tm(unix_secs);
     let y = tm.tm_year as i64 + 1900;
     let m = tm.tm_mon as i64 + 1;
     let d = tm.tm_mday as i64;
@@ -3723,9 +3731,7 @@ pub fn local_today_str() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("Time went backwards")
         .as_secs() as i64;
-    let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
-    let time_t = secs as libc::time_t;
-    unsafe { libc::localtime_r(&time_t, &mut tm) };
+    let tm = unix_secs_to_local_tm(secs);
     format!("{:04}-{:02}-{:02}", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday)
 }
 
@@ -3735,9 +3741,7 @@ pub fn local_hour() -> u32 {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("Time went backwards")
         .as_secs() as i64;
-    let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
-    let time_t = secs as libc::time_t;
-    unsafe { libc::localtime_r(&time_t, &mut tm) };
+    let tm = unix_secs_to_local_tm(secs);
     tm.tm_hour as u32
 }
 
@@ -3764,9 +3768,7 @@ pub fn local_weekday() -> u32 {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("Time went backwards")
         .as_secs() as i64;
-    let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
-    let time_t = secs as libc::time_t;
-    unsafe { libc::localtime_r(&time_t, &mut tm) };
+    let tm = unix_secs_to_local_tm(secs);
     // tm_wday: 0=Sun. Map to Mon=0..Sun=6
     match tm.tm_wday {
         0 => 6, // Sun
